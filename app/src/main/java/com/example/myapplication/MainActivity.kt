@@ -12,28 +12,71 @@ import android.speech.SpeechRecognizer
 import android.util.Log
 import android.widget.Button
 import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
+import androidx.core.view.children
+import androidx.recyclerview.widget.RecyclerView
+import com.example.myapplication.adapters.WordListAdapter
+import com.example.myapplication.models.Dummy
+import org.w3c.dom.Text
 
 
-class MainActivity : AppCompatActivity(){
+class MainActivity : AppCompatActivity() {
     lateinit var speechRecognizer: SpeechRecognizer
+
+    lateinit var textView: TextView
+    lateinit var startButton: Button
+    lateinit var stopButton: Button
+    lateinit var recyclerView: RecyclerView
+    lateinit var debugCurrentValue: TextView
+
+    private val myAdapter: WordListAdapter = WordListAdapter()
+    private var currentPosition:Int = 0
+
+    private val itemsList: MutableList<Boolean> = Dummy.getBooleanList()
+
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
-        val startButton = findViewById<Button>(R.id.startButton)
-        val stopButton = findViewById<Button>(R.id.stopButton)
-        val textView = findViewById<TextView>(R.id.textView)
+        initViews()
+        setRecognizerListener()
+
+        debugCurrentValue.text = currentPosition.toString()
+
+    }
+
+    private fun initViews() {
+        startButton = findViewById<Button>(R.id.startButton)
+        stopButton = findViewById<Button>(R.id.stopButton)
+
+        //TextViews
+        textView = findViewById<TextView>(R.id.textView)
+        debugCurrentValue = findViewById(R.id.debug_current_position)
+
+        recyclerView = findViewById<RecyclerView>(R.id.recyclerView)
         speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
+        myAdapter.setItems(Dummy.getWordlist())
+        recyclerView.adapter = myAdapter
 
 
+        startButton.setOnClickListener {
+           markItem(true)
+        }
+        stopButton.setOnClickListener {
+            markItem(false)
+        }
+    }
 
-        speechRecognizer.setRecognitionListener(object: RecognitionListener{
+    private fun setRecognizerListener() {
+        speechRecognizer.setRecognitionListener(object : RecognitionListener {
             override fun onReadyForSpeech(params: Bundle?) {
                 println("Ready for speech")
             }
 
             override fun onRmsChanged(rmsdB: Float) {
-                println("RMS value for Speech is $rmsdB")
+                //println("RMS value for Speech is $rmsdB")
             }
 
             override fun onBufferReceived(buffer: ByteArray?) {
@@ -62,52 +105,83 @@ class MainActivity : AppCompatActivity(){
             }
 
             override fun onError(error: Int) {
-                println("Error has occurred $error")
+                if (error == SpeechRecognizer.ERROR_NO_MATCH) {
+                    println("Voice not detected")
+                } else {
+                    println("Error has occurred $error")
+                    // if there is an error, or no sound is made
+                    // mark current item as false and continue to next item
+                    markItem(false)
+
+                }
+
 
             }
 
             override fun onResults(results: Bundle?) {
-                results?.keySet()?.forEach {
-                    Log.d("myApplication", "${it} is a key in the bundle")
+                val textResult = results?.get("results_recognition").toString();
+                val spokenWord =  textResult.subSequence(1, textResult.length - 1).toString()
+                if (checkCurrentWordCorrect(spokenWord)){
+                    //mark current word as green
+                    markItem(true)
+                } else {
+                    // mark current word as red
+                    markItem(false)
                 }
 
-                println("Results are -->"+results?.get("results_recognition").toString())
-                textView.text = results?.get("results_recognition").toString()
-
-                println("Confidence Scores are -->"+results?.get("confidence_scores").toString())
             }
 
         })
+    }
 
-        startButton.setOnClickListener {
-            if(checkSelfPermission(permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED){
-                //permission Granted, start recognition
-                startSpeechRecognition()
-            } else {
-                requestPermissions(listOf(Manifest.permission.RECORD_AUDIO).toTypedArray(),101)
-            }
+    private fun markItem(value: Boolean){
+       val currentChild = recyclerView.getChildViewHolder(recyclerView.layoutManager!!.getChildAt(0)!!)
+        (currentChild as WordListAdapter.WordViewHolder).frame.background = if (value){
+            itemsList[currentPosition++] = true
+            ContextCompat.getDrawable(this,R.drawable.view_border_correct)
+        } else {
+            itemsList[currentPosition++] = true
+            ContextCompat.getDrawable(this,R.drawable.view_border_incorrect)
         }
+        recyclerView.smoothScrollToPosition(currentPosition)
 
-        stopButton.setOnClickListener {
-            speechRecognizer.stopListening()
+        //debug stuff here
+        printDebug("currentPosition is $currentPosition")
+        printDebug("recyclerView child count is ${recyclerView.childCount}")
+        printDebug("currentChild adapter position is  ${recyclerView.getChildAdapterPosition(recyclerView.layoutManager!!.getChildAt(0)!!)}")
+    }
+
+    private fun startSpeechRecognition() {
+        val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_MUTE, 0)
+        try {
+            speechRecognizer.startListening(RecognizerIntent.getVoiceDetailsIntent(this))
+        } catch (e: Exception) {
+            e.printStackTrace()
+            Toast.makeText(this,"Error While Locating a Recognizer",Toast.LENGTH_LONG).show()
         }
     }
 
+
+
+    fun  checkCurrentWordCorrect(spokenWord: String): Boolean{
+        val currentWord = Dummy.getWordlist()[currentPosition]
+        return currentWord.value == spokenWord
+    }
+
     override fun onRequestPermissionsResult(
-        requestCode: Int,
-        permissions: Array<out String>,
-        grantResults: IntArray
+            requestCode: Int,
+            permissions: Array<out String>,
+            grantResults: IntArray
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if(requestCode==101 && grantResults.all { it == PackageManager.PERMISSION_GRANTED }){
+        if (requestCode == 101 && grantResults.all { it == PackageManager.PERMISSION_GRANTED }) {
             startSpeechRecognition()
         }
     }
 
-    fun startSpeechRecognition(){
-        val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_MUTE, 0)
-        speechRecognizer.startListening(RecognizerIntent.getVoiceDetailsIntent(this))
+    private fun printDebug(message: String){
+        debugCurrentValue.text = "${debugCurrentValue.text} \n $message"
     }
 
 }
